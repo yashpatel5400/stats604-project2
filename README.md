@@ -1,6 +1,12 @@
 # Gene expression in the Brain
 UMich STATS 604: Project 2
 
+## Team Members
+- Ben Agyare
+- Yumeng Wang
+- Jake Trauger
+- Yash Patel
+
 ## Goal
 Find genes that are differentially expressed between
 1. males and females
