@@ -1,0 +1,211 @@
+---
+title: "Gene Expression in the Brain"
+output:
+  pdf_document: default
+  html_document: default
+date: "2022-09-27"
+---
+
+```{r load_hidden, echo=FALSE, results="hide", warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+
+#-------------------- INSTALL REQUIRED PACKAGES ---------------------
+# if (!requireNamespace("BiocManager"))
+#     install.packages("BiocManager")
+# BiocManager::install(c("limma", "edgeR", "Glimma", "org.Mm.eg.db", "gplots", "RColorBrewer", "NMF", "BiasedUrn", "DESeq2"))
+
+#--------------------- LOAD PACKAGES ----------------
+suppressPackageStartupMessages({
+library(edgeR)
+library(limma)
+library(gplots)
+library(RColorBrewer)
+library(tidyverse)
+})
+```
+
+<!-- %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 1. INTRODUCTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%                 %%%%%%%%%%%%%%%%%%%%%%%%%%-->
+
+# 1. Abstract
+
+
+
+# 2. Exploratory Data Analysis
+```{r, cache=TRUE}
+#---------------------  Read the data into R
+load("data/brain.rda")
+
+expr = as.data.frame(expression)
+gen  = as.data.frame(genes) %>%
+          mutate(row_name = rownames(.), .before = sym)
+samp = as.data.frame(samples)
+samp$patient = as.factor(samp$patient)
+
+#-------------------- Normalized Gene data
+expr_g_form <- read.csv("data/normalized_genes.csv",
+                        header = T, sep = ",", check.names = FALSE) # genes
+expr_p_form <- read.csv("data/normalized_probes.csv",
+                        header = T, sep = ",", check.names = FALSE) # probes
+
+```
+
+
+
+```{r, original data}
+#------------------- Inspecting data
+##### expression data ######
+## NA gene symbols
+genn_s <- is.na(gen$sym)
+genn_c <- is.na(gen$chrom)
+
+## Get rownames of NA genes
+row_name_NA <- gen[genn_s, "row_name"]
+
+## bacteria genes
+bact_gen <- expr %>%
+  dplyr::select(all_of(row_name_NA) | contains("AFFX")) 
+
+## Corrected genes (without bacteria)
+gen_cr <- gen[!(gen$row_name %in% names(bact_gen)), ]
+```
+
+
+```{r, normalized data}
+# We can use row names of the `expression data` to identify source of lab for bacteria genes for normalization.
+
+#------------------- Inspecting data
+
+##### expression data ######
+gen_form <- gen %>%
+              filter(row_name %in% names(expr_p_form)[-1])
+
+
+## for probes             
+expr_p_formed <- expr_p_form[-1]
+rownames(expr_p_formed) <- rownames(samp)
+
+## for genes
+expr_g_formed <- expr_g_form[-1]
+rownames(expr_g_formed) <- rownames(samp)
+```
+
+
+```{r}
+#--------------- Remove bacteria genes
+## now remove bacteria genes and format the data as gene for row and sample for column
+expr_f0 <- as.data.frame(expr) %>%
+  dplyr::select(-(names(bact_gen))) %>%
+  t() %>%
+  as.data.frame()
+
+
+expr_f <-expr_p_formed %>%
+  t() %>%
+  as.data.frame()
+
+
+## for genes
+expr_g <-expr_g_formed %>%
+  t() %>%
+  as.data.frame()
+```
+
+
+
+```{r}
+## convert expr to DGEList object
+expr_DGE_0  <- DGEList(expr_f0)
+expr_DGE_1  <- expr_DGE_2 <- DGEList(expr_f)
+expr_DGE_g  <- expr_DGE_2 <- DGEList(expr_g)
+
+## add gene data
+expr_DGE_0$genes  <- gen_cr
+expr_DGE_1$genes  <- expr_DGE_2$genes <- gen_form
+
+
+# Add the group information into the DGEList
+expr_DGE_g$samples$group <-  factor(samp$sex)
+expr_DGE_1$samples$group <- factor(samp$sex)
+expr_DGE_2$samples$group <- factor(str_replace_all(samp$region, " ", ""))
+```
+
+
+For a good experimental design for gene differential analysis, measurements have to be accurate. Due to uncertainty in measurements, there is the need for replication. The most common types of replications are biological and technical replications. Biology replication involves taking measurements mostly in the same lab and with same technology for several samples of the same cell, while technical replication deals with repeating identical labs and protocols for sequencing on a single sample. While replication fosters confidence in our analysis as it enables us to quantify uncertainty, it posses yet a potential problem in gene differential analysis. For example, technical replication, if exists, could confound the true gene expression differentiation or can cause expression for reasons unrelated to the levels of the expression. 
+Thus, it is highly imperative to investigate the presence of variations arising from replications before conducting further statistical analysis. A statistical tool for doing such investigation is called Exploratory Data Analysis (EDA).   
+
+
+The dataset has technical replicates. Measurements were taken from three labs viz Michigan, Irvine and Davis. We first make examine the distribution of genes by Lab for box sexes (Fig 1 \& 2) and the look at same for the ACC \& DLPFC brain regions by lab (Fig 3 \& 4).
+
+
+***YUMENG'S CODES***  
+
+
+We observe in Fig 1 \& 2 that the distributions of the gene expressions vary by lab for both sexes. This is a clear indication of variability due to technical replication. Same story can be told about the distributions of the genes for the ACC \& DLPFC brain regions. Further, we make a Multi-Dimensional Scale (MDS) plot to see how the various replicates cluster among each other for the 10 patients.     
+
+```{r, fig.align='center'}
+#-------------- SAVE PLOTS
+#1. Open jpeg file
+#jpeg("plots/MDS pre.jpg")
+# 2. Create the plot
+par(mar = c(9,5,3,8), xpd = T)
+col.patient <- c(rainbow(6), "dodgerblue", "darkorange", "black", "brown")[samp$patient]
+pch.region  <- c(1,4, 6)[samp$region]
+plotMDS(expr_DGE_0, col=col.patient, pch = pch.region, cex = 1.5,
+        xlab = "Leading dim 1",
+        ylab = "Leading dim 2")
+legend("topright", inset = c(-0.36, 0.0),
+       legend=levels(samp$patient),
+       fill = unique(col.patient)
+       )
+legend("topright", inset = c(0.4, 1.4),
+       legend=levels(samp$region),
+       pch=c(1,4, 6)
+       )
+title("MDS for technical variation (pre-normalization)")
+
+# 3. Close the file
+#dev.off()
+```
+
+
+
+Fig 5 show the first two dimensions of the MDS. The first dimension explains 35\% while the second explains 23\% of the total variation explained by the MDS. Clearly, there is significant sparsity for the replicates of each patient as the various measurements across the three labs are farther apart.   
+ 
+
+
+The issue of variation due to technical replications is one that had left researches with serious decisions to make in the past years. Should the scientist throw the data away and start all over? Recent developments have provided a good solution to handle this problem viz Normalization. There have been several normalization techniques that scientists have employed in reducing technical variations including the use of housekeeping (control) genes as baseline or the expression level from a particular quantile of the distribution of gene expression values of each sample as well as using variance stabilizing transform from statistical modeling. We employ one of the Normalization techniques which would be discussed in the subsequent section and visualize the MDS plot post normalization in Fig 6.
+```{r, fig.align='center'}
+#-------------- SAVE PLOTS
+#1. Open jpeg file
+#jpeg("plots/MDS post.jpg")
+# 2. Create the plot
+#col.patient <- brewer.pal(n = 10, name = "RdBu")[samp$patient]
+#barplot(1:8, col = c(rainbow(6), "dodgerblue", "darkorange"))
+par(mar = c(9,5,3,8), xpd = T)
+col.patient <- c(rainbow(6), "dodgerblue", "darkorange", "black", "brown")[samp$patient]
+pch.region  <- c(1,4, 6)[samp$region]
+plotMDS(expr_DGE_1, col=col.patient, pch = pch.region, cex = 1.5,
+        xlab = "Leading dim 1",
+        ylab = "Leading dim 2")
+legend("topright", inset = c(-0.36, 0.0),
+       legend=levels(samp$patient),
+       fill = unique(col.patient)
+       )
+legend("topright", inset = c(0.4, 1.4),
+       legend=levels(samp$region),
+       pch=c(1,4, 6)
+       )
+title("MDS for technical variation (post normailization)")
+# 3. Close the file
+#dev.off()
+
+```
+
+
+We observe that, normalizating the data has resulted in significant reduction in the variation due to technical replication (comparing Fig 5 and 6). This gives us some confidence in assessing the true gene differentiation as we perform the appropriate statistical analyses in the rest of the sections of this report.
+
+
+
+
